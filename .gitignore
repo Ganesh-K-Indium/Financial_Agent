@@ -1,0 +1,4 @@
+/.env
+/debug_qdrant.py
+/opt
+/venv
