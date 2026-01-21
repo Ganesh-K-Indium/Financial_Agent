@@ -34,9 +34,9 @@ class SECHandler:
             print(f"Error fetching CIK: {e}")
             return ""
 
-    def fetch_latest_10k(self, ticker: str) -> str:
+    def fetch_latest_filing(self, ticker: str, form_type: str = "10-K") -> str:
         """
-        Fetches the text content of the latest 10-K filing.
+        Fetches the text content of the latest filing of a specific type.
         """
         param_cik = self.get_cik(ticker)
         if not param_cik:
@@ -48,28 +48,31 @@ class SECHandler:
             time.sleep(0.2)
             submissions = self.client.get_submissions(cik=param_cik)
             
-            # Filter for 10-K
+            # Filter for Form
             # Recent filings are in 'filings' -> 'recent'
             recent = submissions["filings"]["recent"]
             
             accession_number = None
             primary_document = None
             
+            print(f"Searching for latest {form_type}...")
+            
             for i, form in enumerate(recent["form"]):
-                if form == "10-K":
+                # Simple exact match for form type (e.g. '10-K', '8-K', '4')
+                if form == form_type:
                     accession_number = recent["accessionNumber"][i]
                     primary_document = recent["primaryDocument"][i]
                     break
             
             if not accession_number:
-                return "Error: No 10-K found in recent submissions."
+                return f"Error: No {form_type} found in recent submissions for {ticker}."
                 
             # Construct URL
             # https://www.sec.gov/Archives/edgar/data/{cik}/{accession_nodash}/{primary_doc}
             accession_nodash = accession_number.replace("-", "")
             url = f"https://www.sec.gov/Archives/edgar/data/{param_cik}/{accession_nodash}/{primary_document}"
             
-            print(f"Fetching 10-K from: {url}")
+            print(f"Fetching {form_type} from: {url}")
             resp = requests.get(url, headers=self.headers)
             
             # Simple text extraction

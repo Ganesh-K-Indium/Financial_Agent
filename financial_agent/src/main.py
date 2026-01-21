@@ -10,7 +10,6 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.config import config
-from src.retrieval.hybrid import HybridRetriever
 from src.tools.sec_edgar import sec_handler
 from src.analysis.alpha_engine import AlphaEngine
 from src.utils.memory import RedisMemory
@@ -24,20 +23,21 @@ def main():
     parser.add_argument("--ingest", action="store_true", help="Ingest data for the ticker")
     parser.add_argument("--file", type=str, help="Local PDF file to ingest")
     parser.add_argument("--year", type=str, default="Latest", help="Year of the filing (e.g. 2024)")
+    parser.add_argument("--type", type=str, default="10-K", help="Form type (10-K, 10-Q, 8-K, 4)")
     
     args = parser.parse_args()
     
     memory = RedisMemory()
     alpha_engine = AlphaEngine()
     
-    # Init retriever lazily or if ticker is known
-    ticker_arg = args.ticker if args.ticker else ""
-    retriever = HybridRetriever(ticker=ticker_arg)
+    # Init retriever (Now just QdrantVectorDB)
+    # We instantiate it once. 
+    vector_db = QdrantVectorDB()
     
     if args.ingest and args.ticker:
-        print(f"Ingesting data for {args.ticker} (Year: {args.year})...")
+        print(f"Ingesting data for {args.ticker} (Year: {args.year}, Type: {args.type})...")
         ingestion = IngestionEngine()
-        vector_db = QdrantVectorDB()
+        # vector_db already inited above
         
         raw_content = None
         
@@ -50,8 +50,8 @@ def main():
         else:
             # Cloud Fetch
             # 1. Fetch Real Data
-            print(f"Fetching 10-K for {args.ticker}...")
-            raw_content = sec_handler.fetch_latest_10k(args.ticker)
+            print(f"Fetching {args.type} for {args.ticker}...")
+            raw_content = sec_handler.fetch_latest_filing(args.ticker, form_type=args.type)
             if "Error" in raw_content:
                 print(raw_content)
                 return
@@ -59,7 +59,8 @@ def main():
         # 2. Chunk
         print("Chunking document...")
         # process_document handles list or str
-        chunks = ingestion.process_document(args.ticker, "10-K", raw_content, year=args.year)
+        # We pass args.type as the doc_type logic
+        chunks = ingestion.process_document(args.ticker, args.type, raw_content, year=args.year)
         print(f"Created {len(chunks)} chunks.")
         
         # 3. Embed & Index
@@ -76,9 +77,8 @@ def main():
         # 2. Retrieve Context (Real)
         # We search based on the query.
         print("Retrieving context...")
-        # Current retriever.search() ALREADY does MultiQuery expansion internally.
-        # See src/retrieval/hybrid.py -> generate_queries()
-        general_results = retriever.search(args.query, limit=10)
+        # New QdrantVectorDB.search takes a string query directly
+        general_results = vector_db.search(args.query, limit=10)
         general_context = "\n".join([r['text'] for r in general_results])
         
         doc_context = {}
@@ -93,7 +93,8 @@ def main():
         }
         
         for key, q in dimensions_queries.items():
-             res = retriever.search(q, limit=3)
+            # Simply search with the query string
+             res = vector_db.search(q, limit=3)
              text = "\n".join([r['text'] for r in res])
              # Enrich dimension context with relevant general context
              doc_context[key] = text + "\n---\n" + general_context
@@ -118,11 +119,6 @@ def main():
                 print(f"Bridge search failed for {key}: {e}")
              
         # Fallback to Web Search for 'market' and 'news'
-        # We already did some 'market' bridging, but we'll keep the general one too or merge it?
-        # The original code did:
-        # doc_context["market"] += ("\n" + web_text)
-        # doc_context["news"] = web_text 
-        
         print("Fetching live market data (Web Search)...")
         web_res = web_search_tool.search(f"{ticker} stock price valuation news")
         web_text = "\n".join([f"{w['title']}: {w['snippet']}" for w in web_res])
