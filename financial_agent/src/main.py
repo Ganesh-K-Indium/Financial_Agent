@@ -79,6 +79,11 @@ def main():
         print("Retrieving context...")
         # New QdrantVectorDB.search takes a string query directly
         general_results = vector_db.search(args.query, limit=10)
+        
+        print(f"  [DEBUG] General Search Results found: {len(general_results)}")
+        for i, r in enumerate(general_results):
+            print(f"    - {i+1} [Score: {r['score']:.4f}] {r['text'][:100].replace(chr(10), ' ')}...")
+
         general_context = "\n".join([r['text'] for r in general_results])
         
         doc_context = {}
@@ -95,6 +100,10 @@ def main():
         for key, q in dimensions_queries.items():
             # Simply search with the query string
              res = vector_db.search(q, limit=3)
+             print(f"  [DEBUG] Dimension '{key}' Search Results found: {len(res)}")
+             for i, r in enumerate(res):
+                 print(f"    - {i+1} [Score: {r['score']:.4f}] {r['text'][:100].replace(chr(10), ' ')}...")
+                 
              text = "\n".join([r['text'] for r in res])
              # Enrich dimension context with relevant general context
              doc_context[key] = text + "\n---\n" + general_context
